@@ -1,5 +1,4 @@
 # Default helm value https://github.com/jenkinsci/helm-charts/blob/main/charts/jenkins/values.yaml
-#
 clusterAdminEnabled: false
 jenkins:
   rbac:
@@ -8,10 +7,25 @@ jenkins:
   persistence:
     enabled: true
     size: 50Gi
-  master:
+    volumes:
+      - name: jenkins-secrets
+        secret:
+          secretName: jenkins-secrets
+    mounts:
+      - name: jenkins-secrets
+        mountPath: /var/jenkins_secrets
+        readOnly: true
+  controller:
+    probes:
+      startupProbe:
+        initialDelaySeconds: 120
+      livenessProbe:
+        initialDelaySeconds: 120
+      readinessProbe:
+        initialDelaySeconds: 120
     testEnabled: false
     image: jenkins/jenkins
-    imageTag: 2.271-jdk11
+    tag: 2.280-jdk11
     ingress:
       apiVersion: networking.k8s.io/v1beta1
     runAsUser: 1000
@@ -60,6 +74,7 @@ jenkins:
       - github-api
       - github-branch-source
       - github-checks
+      - github-label-filter
       - inline-pipeline
       - jira
       - job-dsl
@@ -71,6 +86,7 @@ jenkins:
       - matrix-auth
       - matrix-project
       - pipeline-build-step
+      - pipeline-github
       - pipeline-graph-analysis
       - pipeline-input-step
       - pipeline-milestone-step
@@ -84,6 +100,7 @@ jenkins:
       - plain-credentials
       - prometheus
       - scm-api
+      - scm-filter-branch-pr
       - script-security
       - ssh-agent
       - ssh-credentials
@@ -106,7 +123,7 @@ jenkins:
       - metrics
   serviceAccount:
     create: true
-    name: jenkins-master
+    name: jenkins-controller
   serviceAccountAgent:
     create: true
     name: jenkins-agent

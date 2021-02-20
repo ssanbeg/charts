@@ -58,7 +58,26 @@ https://get.jenkins.io/windows/2.251/jenkins.msi.sha256?stats
 ## Requirements
 This chart requires a redis database which can be deployed with the redis helm [chart](https://github.com/helm/charts/tree/master/stable/redis)
 
-## Configuration
+## HowTo
+
+Mirrorbits is configured using its cli. The configuration is stored in the redis database which means that you can either store a configuration 
+locally and run the cli from your machine or you can connect inside one of the pod running to use the cli.
+
+### Access mirrobits cli
+ 
+You need to first identify a pod name and then run a bash command inside it.
+
+* ```kubectl get pods -n mirrorbits -l "app.kubernetes.io/name=mirrorbits"```
+* ```kubectl exec -i -t -n mirrorbits -c mirrorbits <POD_NAME> bash```
+
+### Disable Mirrors
+
+You need to identify the mirror identifier that you wand to disable and then disable it.
+
+* ```mirrorbits list```
+* ```mirrorbits disable [IDENTIFIER]```
+
+### Add Mirrors Configuration
 
 Currently mirrorbits do not provide a way to configure mirrors through a configuration file and considering that this is not something that changes regularly, I will run the following commands once via "kubectl" exec
 
@@ -81,6 +100,12 @@ mirrorbits add -http https://ftp.yz.yamagata-u.ac.jp/pub/misc/jenkins/ -rsync rs
 mirrorbits add -http https://mirror.gruenehoelle.nl/jenkins/ -rsync rsync://esme.gruenehoelle.nl/mirror/jenkins/ -admin-name "gunter@grodotzki.com" -admin-email "gunter@grodotzki.com" gruenehoelle.nl
 
 mirrorbits add -http https://ftp.halifax.rwth-aachen.de/jenkins/ -rsync rsync://ftp.halifax.rwth-aachen.de/jenkins/ -ftp ftp://ftp.halifax.rwth-aachen.de/jenkins/ -admin-name "ftp@halifax.rwth-aachen.de" -admin-email "ftp@halifax.rwth-aachen.de" rwth-aachen.de
+
+# `20.62.81.57` is a dynamic generated IP retrieved using command `kubectl get service -n mirror  mirror-rsyncd`
+# `20.62.81.57` can be replaced by `mirror-rsyncd.mirror` if on the same kubernetes cluster
+mirrorbits add -http https://mirror.azure.jenkins.io/ -rsync rsync://mirror-rsyncd.mirror/jenkins/ -admin-name "Jenkins Infrastructure" -admin-email "jenkinsci-infra@googlegroups.com" mirror.azure.jenkins.io
+
+mirrorbits add -http https://ftp.belnet.be/mirror/jenkins/ -rsync rsync://rsync.belnet.be -admin-name "Belnet" -admin-email "ftpmaint@belnet.be" ftp.belnet.be
 ```
 
 ## Links

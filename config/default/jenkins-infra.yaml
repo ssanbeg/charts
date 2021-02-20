@@ -1,3 +1,4 @@
+---
 clusterAdminEnabled: true
 jenkins:
   agent:
@@ -7,7 +8,7 @@ jenkins:
       allowed: true
       namespaceLabels:
         name: "jenkins-infra"
-  master:
+  controller:
     JCasC:
       enabled: true
       defaultConfig: false
@@ -17,6 +18,11 @@ jenkins:
             system:
               domainCredentials:
                 - credentials:
+                  - gitHubApp:
+                      appID: "${GITHUB_APP_ID}"
+                      description: "GitHub App for infra.ci.jenkins.io"
+                      id: "github-app-infra"
+                      privateKey: "${GITHUB_APP_PRIVATE_KEY}"
                   - usernamePassword:
                       description: "GitHub access token for jenkinsadmin"
                       id: "github-access-token"
@@ -119,7 +125,7 @@ jenkins:
                   branchSources {
                     github {
                       id('2019081602')
-                      scanCredentialsId('github-access-token')
+                      scanCredentialsId('github-app-infra')
                       repoOwner('jenkins-infra')
                       repository('charts')
                     }
@@ -129,6 +135,26 @@ jenkins:
                       scriptPath('Jenkinsfile_k8s')
                     }
                   }
+                  configure { node ->
+                    def traits = node / 'sources' / 'data' / 'jenkins.branch.BranchSource' / 'source' / 'traits'
+                    traits << 'org.jenkinsci.plugins.github__branch__source.BranchDiscoveryTrait' {
+                      strategyId(1)
+                    }
+                    traits << 'org.jenkinsci.plugins.github__branch__source.OriginPullRequestDiscoveryTrait' {
+                      strategyId(1)
+                    }
+                    traits << 'org.jenkinsci.plugins.github__branch__source.ForkPullRequestDiscoveryTrait' {
+                      strategyId(1)
+                      trust(class: 'org.jenkinsci.plugins.github_branch_source.ForkPullRequestDiscoveryTrait$TrustPermission')
+                    }
+                    traits << 'jenkins.scm.impl.trait.WildcardSCMHeadFilterTrait' {
+                      includes('main master PR-*')
+                      excludes()
+                    }
+                    traits << 'org.jenkinsci.plugins.github.label.filter.PullRequestLabelsBlackListFilterTrait' {
+                      labels('on-hold ci-skip')
+                    }
+                  }
                 }
             - script: >
                 multibranchPipelineJob('plugin-site') {
@@ -136,7 +162,7 @@ jenkins:
                   branchSources {
                     github {
                       id('2019081602')
-                      scanCredentialsId('github-access-token')
+                      scanCredentialsId('github-app-infra')
                       repoOwner('jenkins-infra')
                       repository('plugin-site')
                       includes('master')
@@ -149,70 +175,84 @@ jenkins:
                   }
                 }
             - script: >
-                multibranchPipelineJob('docker-packer') {
-                  displayName "Packer Docker Build"
-                  branchSources {
+                organizationFolder('Docker Builds') {
+                  description('Docker Builds')
+                  displayName('Docker Builds')
+                  organizations {
                     github {
-                      id('2020101901')
-                      scanCredentialsId('github-access-token')
-                      repoOwner('jenkins-infra')
-                      repository('docker-packer')
+                      repoOwner("jenkins-infra")
+                      apiUri("https://api.github.com")
+                      credentialsId('github-app-infra')
+
+                      traits {
+                        gitHubTagDiscovery()
+                        cloneOptionTrait {
+                          extension {
+                            shallow(false)
+                            noTags(false)
+                            reference('')
+                            timeout(10)
+                            honorRefspec(true)
+                          }
+                        }
+                      }
                     }
                   }
-                  factory {
-                    workflowBranchProjectFactory {
+
+                  orphanedItemStrategy {
+                    discardOldItems {
+                      daysToKeep(7)
+                      numToKeep(10)
+                    }
+                  }
+
+                  projectFactories {
+                    workflowMultiBranchProjectFactory {
                       scriptPath('Jenkinsfile_k8s')
                     }
                   }
-                }
-            - script: >
-                multibranchPipelineJob('docker-mirrorbits') {
-                  displayName "Mirrorbits Docker Build"
-                  branchSources {
-                    github {
-                      id('2020102301')
-                      scanCredentialsId('github-access-token')
-                      repoOwner('jenkins-infra')
-                      repository('docker-mirrorbits')
+
+                  buildStrategies {
+                    buildAnyBranches {
+                      strategies {
+                        buildChangeRequests {
+                          ignoreTargetOnlyChanges(true)
+                          ignoreUntrustedChanges(true)
+                        }
+                        buildRegularBranches()
+                        buildTags {
+                          atLeastDays("0")
+                          atMostDays("7")
+                        }
+                      }
                     }
                   }
-                  factory {
-                    workflowBranchProjectFactory {
-                      scriptPath('Jenkinsfile_k8s')
+
+                  configure { node ->
+                    def traits = node / navigators / 'org.jenkinsci.plugins.github__branch__source.GitHubSCMNavigator' / traits
+                    traits << 'jenkins.scm.impl.trait.RegexSCMSourceFilterTrait' {
+                      regex('docker-.*')
                     }
-                  }
-                }
-            - script: >
-                multibranchPipelineJob('docker-datadog') {
-                  displayName "DataDog Docker Build"
-                  branchSources {
-                    github {
-                      id('2020111801')
-                      scanCredentialsId('github-access-token')
-                      repoOwner('jenkins-infra')
-                      repository('docker-datadog')
+                    traits << 'org.jenkinsci.plugins.github__branch__source.BranchDiscoveryTrait' {
+                      strategyId(1)
                     }
-                  }
-                  factory {
-                    workflowBranchProjectFactory {
-                      scriptPath('Jenkinsfile_k8s')
+                    traits << 'org.jenkinsci.plugins.github__branch__source.OriginPullRequestDiscoveryTrait' {
+                      strategyId(1)
                     }
-                  }
-                }
-            - script: >
-                multibranchPipelineJob('docker-terraform') {
-                  displayName "Terraform Docker Build"
-                  branchSources {
-                    github {
-                      id('2020121001')
-                      scanCredentialsId('github-access-token')
-                      repoOwner('jenkins-infra')
-                      repository('docker-terraform')
+                    traits << 'org.jenkinsci.plugins.github__branch__source.ForkPullRequestDiscoveryTrait' {
+                      strategyId(1)
+                      trust(class: 'org.jenkinsci.plugins.github_branch_source.ForkPullRequestDiscoveryTrait$TrustPermission')
                     }
-                  }
-                  factory {
-                    workflowBranchProjectFactory {
-                      scriptPath('Jenkinsfile_k8s')
+                    traits << 'org.jenkinsci.plugins.github__branch__source.ExcludeArchivedRepositoriesTrait' {
+                    }
+                    traits << 'net.gleske.scmfilter.impl.trait.WildcardSCMHeadFilterTrait' {
+                      includes('main master PR-*')
+                      excludes()
+                      tagIncludes('*')
+                      tagExcludes()
+                    }
+                    traits << 'org.jenkinsci.plugins.github.label.filter.PullRequestLabelsBlackListFilterTrait' {
+                      labels('on-hold ci-skip')
                     }
                   }
                 }
@@ -222,7 +262,7 @@ jenkins:
                   branchSources {
                     github {
                       id('2020120401')
-                      scanCredentialsId('github-access-token')
+                      scanCredentialsId('github-app-infra')
                       repoOwner('jenkins-infra')
                       repository('aws')
                     }
@@ -251,7 +291,7 @@ jenkins:
                       branchSource {
                         source {
                           github {
-                            credentialsId("github-access-token")
+                            credentialsId("github-app-infra")
                             configuredByUrl(true)
                             repositoryUrl('https://github.com/' + config[0] + '/' + config[1])
                             repoOwner(config[0])
@@ -328,7 +368,7 @@ jenkins:
                   modernSCM:
                     scm:
                       git:
-                        id: "github-access-token"
+                        id: "github-app-infra"
                         remote: "https://github.com/jenkins-infra/pipeline-library.git"
         matrix-settings: |
           jenkins:
