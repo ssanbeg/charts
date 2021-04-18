@@ -1,23 +1,20 @@
-source:
-  kind: helmChart
-  spec:
-    url: https://charts.helm.sh/stable
-    name: dex
-
-conditions:
-  exist:
-    name: "Dex helm chart available on Registry"
+title: Bump Captain Hook helm chart version
+pipelineID: captainhookhelmfile
+sources:
+  default:
     kind: helmChart
     spec:
-      url: https://charts.helm.sh/stable
-      name: dex
-  helmfileRelease:
-    name: "stable/dex Helm Chart"
+      url: https://garethjevans.github.io/captain-hook
+      name: captain-hook
+conditions:
+  chartVersion:
+    name: "Test captain-hook/captain-hook Helm Chart position in helmfile"
     kind: yaml
+    sourceID: default
     spec:
-      file: "helmfile.d/dex.yaml"
+      file: "helmfile.d/captain-hook.yaml"
       key: "releases[0].name"
-      value: "private-dex"
+      value: "captain-hook"
     scm:
       github:
         user: "{{ .github.user }}"
@@ -30,10 +27,11 @@ conditions:
 
 targets:
   chartVersion:
-    name: "stable/dex Helm Chart"
+    name: "captain-hook/captain-hook Helm Chart"
+    sourceID: default
     kind: yaml
     spec:
-      file: "helmfile.d/dex.yaml"
+      file: "helmfile.d/captain-hook.yaml"
       key: "releases[0].version"
     scm:
       github:

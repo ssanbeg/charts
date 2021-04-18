@@ -1,10 +1,14 @@
 clusterAdminEnabled: false
 jenkins:
+  rbac:
+    readSecrets: true
   agent:
     componentName: "agent"
   networkPolicy:
-    # As of today, 2020-06-19, network policy is not supported for windows node https://docs.microsoft.com/en-us/azure/aks/windows-node-limitations#are-all-features-supported-with-windows-nodes
-    # This is a blocker for the release environment as in the current state windows containers are not allowed to connect on main Jenkins.
+    # As of today, 2020-06-19, network policy is not supported for windows node
+    # https://docs.microsoft.com/en-us/azure/aks/windows-node-limitations#are-all-features-supported-with-windows-nodes
+    # This is a blocker for the release environment as in the current state,
+    # windows containers are not allowed to connect on main Jenkins.
     # I disable it for now
     # enabled: true
     enabled: false
@@ -13,8 +17,18 @@ jenkins:
       namespaceLabels:
         name: "release"
   controller:
-    image: jenkins/jenkins
-    tag: 2.263.4-jdk11
+    image: jenkinsciinfra/jenkins-lts
+    tag: 0.1.1-2.277.2
+    resources:
+      limits:
+        cpu: "2"
+        memory: "4Gi"
+      requests:
+        cpu: "2"
+        memory: "4Gi"
+    javaOpts: >
+      -XshowSettings:vm -XX:+UseStringDeduplication -XX:+ParallelRefProcEnabled -XX:+DisableExplicitGC -XX:MaxRAM=4g -XX:+AlwaysPreTouch -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/tmp/ -XX:+UseG1GC -Dorg.csanchez.jenkins.plugins.kubernetes.pipeline.ContainerExecDecorator.websocketConnectionTimeout=60
+
     JCasC:
       enabled: true
       defaultConfig: false
@@ -134,9 +148,9 @@ jenkins:
             clouds:
               - kubernetes:
                   containerCapStr: "100"
-                  jenkinsTunnel: "default-release-jenkins-agent:50000"
                   jenkinsUrl: "http://default-release-jenkins:8080"
                   maxRequestsPerHostStr: "300"
+                  webSocket: true
                   name: "kubernetes"
                   namespace: "release"
                   podRetention: "Never"
@@ -147,7 +161,7 @@ jenkins:
                     - key: "jenkins/default-release-jenkins-agent"
                       value: "true"
                   templates:
-                    - name: jnlp-linux
+                    - name: jnlp
                       nodeSelector: "kubernetes.io/os=linux"
                       containers:
                         - name: jnlp
@@ -156,7 +170,7 @@ jenkins:
                           resourceLimitMemory: "512Mi"
                           resourceRequestCpu: "500m"
                           resourceRequestMemory: "512Mi"
-                          args: "^${computer.jnlpmac} ^${computer.name}"
+                          args: "1d"
                           alwaysPullImage: true
                     - name: jnlp-windows
                       nodeSelector: "kubernetes.io/os=windows"
@@ -167,6 +181,7 @@ jenkins:
                           resourceLimitMemory: "1024Mi"
                           resourceRequestCpu: "500m"
                           resourceRequestMemory: "1024Mi"
+                          args: "1d"
                           alwaysPullImage: true
                       yaml: |-
                         spec:
@@ -393,19 +408,58 @@ jenkins:
                     rootDN: "${LDAP_ROOT_DN}"
                     managerDN: "${LDAP_MANAGER_DN}"
                     managerPasswordSecret: "${LDAP_MANAGER_PASSWORD}"
+                    mailAddressAttributeName: "mail"
                     userSearch: cn={0}
+                    userSearchBase: "ou=people"
+                    groupSearchBase: "ou=groups"
+                disableMailAddressResolver: false
+                groupIdStrategy: "caseInsensitive"
+                userIdStrategy: "caseInsensitive"
                 cache:
                   size: 100
                   ttl: 300
+        advisor-settings: |
+          jenkins:
+            disabledAdministrativeMonitors:
+              - com.cloudbees.jenkins.plugins.advisor.Reminder
+          advisor:
+            acceptToS: true
+            ccs:
+            - "damien.duportal@gmail.com"
+            email: "jenkins@oblak.com"
+            excludedComponents:
+              - "ItemsContent"
+              - "GCLogs"
+              - "Agents"
+              - "RootCAs"
+              - "SlaveLogs"
+              - "HeapUsageHistogram"
+            nagDisabled: true
         matrix-settings: |
           jenkins:
             authorizationStrategy:
               globalMatrix:
                 permissions:
                   - "Overall/Administer:release-core"
-                  - "Overall/SystemRead:all"
-                  - "Overall/Read:all"
-                  - "Job/Read:all"
+                  - "Overall/SystemRead:authenticated"
+                  - "Overall/Read:authenticated"
+                  - "Job/Read:authenticated"
+        system-settings: |
+          jenkins:
+            disabledAdministrativeMonitors:
+              - "jenkins.security.QueueItemAuthenticatorMonitor"
+    sidecars:
+      configAutoReload:
+        env:
+          # https://github.com/kiwigrid/k8s-sidecar#configuration-environment-variables
+          - name: METHOD
+            # Polling mode (instead of watching kube API)
+            value: "SLEEP"
+          # https://github.com/kiwigrid/k8s-sidecar#configuration-environment-variables
+          - name: SLEEP_TIME
+            # Time in seconds between two polls
+            value: "60"
+    installPlugins: false
     ingress:
       enabled: true
       hostName: release.ci.jenkins.io

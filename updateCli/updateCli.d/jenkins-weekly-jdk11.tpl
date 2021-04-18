@@ -1,21 +1,24 @@
-source:
-  name: "Get Jenkins latest weekly version"
-  kind: jenkins
-  postfix: "-jdk11"
-  spec:
-    release: weekly
-    github:
-      username: "{{ .github.username }}"
+title: "Bump jenkins weekly version"
+pipelineID: jenkinsweeklyjdk11
+sources:
+  default:
+    name: "Get latest jenkins-weekly version"
+    kind: githubRelease
+    spec:
+      name: Get jenkins-infra/docker-jenkins-weekly latest version
+      owner: "jenkins-infra"
+      repository: "docker-jenkins-weekly"
       token: "{{ requiredEnv .github.token }}"
+      username: "{{ .github.username }}"
 conditions:
   docker:
-    name: "Test jenkins/jenkins docker image tag"
+    name: "Test jenkinsciinfra/jenkins-weekly:<latest_version> docker image tag"
     kind: dockerImage
     spec:
-      image: "jenkins/jenkins"
+      image: "jenkinsciinfra/jenkins-weekly"
 targets:
   imageTag:
-    name: "Update jenkins/jenkins docker image tag"
+    name: "Update jenkinsciinfra/jenkins-weekly docker image tag"
     kind: yaml
     spec:
       file: "charts/jenkins/values.yaml"

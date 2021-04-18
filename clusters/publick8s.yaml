@@ -5,6 +5,7 @@ helmfiles:
     values: 
       - "../../config/publick8s/datadog.yaml"
   - path: "../helmfile.d/nginx-ingress.yaml"
+  - path: "../helmfile.d/traefik.yaml"
   - path: "../helmfile.d/prometheus.yaml"
   - path: "../helmfile.d/cert-manager.yaml"
   - path: "../helmfile.d/falco.yaml"
@@ -28,3 +29,5 @@ helmfiles:
   - path: "../helmfile.d/archives.yaml"
   - path: "../helmfile.d/custom-distribution-site.yaml"
   - path: "../helmfile.d/incrementals-publisher.yaml"
+  - path: "../helmfile.d/keycloak.yaml"
+  - path: "../helmfile.d/captain-hook.yaml"

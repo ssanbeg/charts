@@ -1,20 +1,20 @@
-title: Bump nginx:stable docker image digest
-pipelineID: nginxdockerdigest
+title: Bump Traefik Helm Chart Version
+pipelineID: bumptraefikhelmchartversion
+
 sources:
   default:
-    kind: dockerDigest
-    name: Get nginx:stable docker image digest
+    kind: helmChart
     spec:
-      image: "nginx"
-      tag: "stable"
+      url: https://helm.traefik.io/traefik
+      name: traefik
 conditions:
-  ENJenkinsio:
-    name: "Update nginx:stable docker image digest for jenkins.io"
+  publicHelmfileRelease:
+    name: "public traefik/traefik Helm Chart"
     kind: yaml
     spec:
-      file: charts/jenkinsio/values.yaml
-      key: images.en.repository
-      value: nginx@sha256
+      file: "helmfile.d/traefik.yaml"
+      key: "releases[0].name"
+      value:  "public-traefik"
     scm:
       github:
         user: "{{ .github.user }}"
@@ -24,13 +24,13 @@ conditions:
         token: "{{ requiredEnv .github.token }}"
         username: "{{ .github.username }}"
         branch: "{{ .github.branch }}"
-  ZHJenkinsio:
-    name: "Update nginx:stable docker image digest for jenkins.io/zh"
+  privateHelmfileRelease:
+    name: "private traefik/traefik Helm Chart"
     kind: yaml
     spec:
-      file: charts/jenkinsio/values.yaml
-      key: images.zh.repository
-      value: nginx@sha256
+      file: "helmfile.d/traefik.yaml"
+      key: "releases[1].name"
+      value: "private-traefik"
     scm:
       github:
         user: "{{ .github.user }}"
@@ -40,15 +40,13 @@ conditions:
         token: "{{ requiredEnv .github.token }}"
         username: "{{ .github.username }}"
         branch: "{{ .github.branch }}"
-
 targets:
-  USJenkinsio:
-    name: "Update nginx:stable docker image digest"
-    kind: helmChart
+  public-traefik:
+    name: "public traefik/traefik Helm Chart"
+    kind: yaml
     spec:
-      name: charts/jenkinsio
-      key: images.en.tag
-      versionIncrement: patch
+      file: "helmfile.d/traefik.yaml"
+      key: "releases[0].version"
     scm:
       github:
         user: "{{ .github.user }}"
@@ -58,13 +56,12 @@ targets:
         token: "{{ requiredEnv .github.token }}"
         username: "{{ .github.username }}"
         branch: "{{ .github.branch }}"
-  ZHJenkinsio:
-    name: "Update nginx:stable docker image digest"
-    kind: helmChart
+  private-traefik:
+    name: "private traefik/traefik Helm Chart"
+    kind: yaml
     spec:
-      name: charts/jenkinsio
-      key: images.zh.tag
-      versionIncrement: patch
+      file: "helmfile.d/traefik.yaml"
+      key: "releases[1].version"
     scm:
       github:
         user: "{{ .github.user }}"

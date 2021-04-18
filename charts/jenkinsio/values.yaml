@@ -3,17 +3,22 @@
 # Declare variables to be passed into your templates.
 
 replicaCount: 1
-image:
-  repository: nginx@sha256 # nginx:1.17
-  tag: 8269a7352a7dad1f8b3dc83284f195bac72027dd50279422d363d49311ab7d9b
-  pullPolicy: Always
+images:
+  en:
+    repository: nginx@sha256 # nginx:1.17
+    tag: 9b0fc8e09ae1abb0144ce57018fc1e13d23abd108540f135dc83c0ed661081cf
+    pullPolicy: Always
+  zh:
+    repository: nginx@sha256 # nginx:1.17
+    tag: 9b0fc8e09ae1abb0144ce57018fc1e13d23abd108540f135dc83c0ed661081cf
+    pullPolicy: Always
 imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 service:
   type: ClusterIP
 # Please define ingress settings into environment variable
-#ingress:
+# ingress:
 #  enabled: true
 #  annotations:
 #    "cert-manager.io/cluster-issuer": "letsencrypt-prod"

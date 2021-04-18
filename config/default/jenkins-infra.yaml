@@ -1,6 +1,8 @@
 ---
 clusterAdminEnabled: true
 jenkins:
+  rbac:
+    readSecrets: true
   agent:
     componentName: "agent"
   networkPolicy:
@@ -9,6 +11,17 @@ jenkins:
       namespaceLabels:
         name: "jenkins-infra"
   controller:
+    resources:
+      limits:
+        cpu: "2"
+        memory: "4Gi"
+      requests:
+        cpu: "2"
+        memory: "4Gi"
+    javaOpts: >
+      -XshowSettings:vm -XX:+UseStringDeduplication -XX:+ParallelRefProcEnabled -XX:+DisableExplicitGC -XX:MaxRAM=4g -XX:+AlwaysPreTouch
+      -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/tmp/ -XX:+UseG1GC
+      -Dorg.csanchez.jenkins.plugins.kubernetes.pipeline.ContainerExecDecorator.websocketConnectionTimeout=60
     JCasC:
       enabled: true
       defaultConfig: false
@@ -94,6 +107,11 @@ jenkins:
                       id: "ci-terraform-secret-key"
                       secret: "${CI_TERRAFORM_AWS_SECRET_ACCESS_KEY}"
                       description: AWS secret key for the account 'ci-terraform'
+                  - file:
+                      fileName: "backend-config"
+                      id: "ci-terraform-backend-config"
+                      scope: GLOBAL
+                      secretBytes: "${base64:${CI_TERRAFORM_BACKEND_CONFIG}}"
                   - string:
                       scope: GLOBAL
                       id: "production-terraform-access-key"
@@ -104,14 +122,43 @@ jenkins:
                       id: "production-terraform-secret-key"
                       secret: "${PRODUCTION_TERRAFORM_AWS_SECRET_ACCESS_KEY}"
                       description: AWS secret key for the account 'production-terraform'
-        k8s-settings: |
+                  - file:
+                      fileName: "backend-config"
+                      id: "production-terraform-backend-config"
+                      scope: GLOBAL
+                      secretBytes: "${base64:${PRODUCTION_TERRAFORM_BACKEND_CONFIG}}"
+                  - file:
+                      fileName: "kubeconfig"
+                      id: "k8s_kubeconfig"
+                      scope: GLOBAL
+                      secretBytes: "${base64:${KUBECONFIG}}"
+                  - file:
+                      fileName: "credentials"
+                      id: "eks_charter_awsconfig"
+                      scope: GLOBAL
+                      secretBytes: "${base64:${EKS_CHARTER_AWSCONFIG}}"
+                  - basicSSHUserPrivateKey:
+                      scope: SYSTEM
+                      id: "ec2-agents-privkey"
+                      username: "key"
+                      description: "SSH privkey used to connect to EC2 agents"
+                      privateKeySource:
+                        directEntry:
+                          privateKey: "${EC2_AGENTS_PRIVKEY}"
+                  - aws:
+                      accessKey: "${EC2_AWS_ACCESS_KEY_ID}"
+                      description: "This credential is used to provision dynamic agents on AWS EC2"
+                      id: "ec2-agents-credentials"
+                      scope: SYSTEM
+                      secretKey: "${EC2_AWS_SECRET_ACCESS_KEY}"
+        agent-settings: |
           jenkins:
             clouds:
               - kubernetes:
                   containerCapStr: "100"
-                  jenkinsTunnel: "jenkins-infra-agent:50000"
                   jenkinsUrl: "http://jenkins-infra:8080"
                   maxRequestsPerHostStr: "300"
+                  webSocket: true
                   name: "kubernetes"
                   namespace: "jenkins-infra"
                   podRetention: "Never"
@@ -122,7 +169,7 @@ jenkins:
                     - key: "jenkins/jenkins-infra-agent"
                       value: "true"
                   templates:
-                    - name: jnlp-linux
+                    - name: jnlp
                       nodeSelector: "kubernetes.io/os=linux"
                       containers:
                         - name: jnlp
@@ -131,18 +178,18 @@ jenkins:
                           resourceLimitMemory: "512Mi"
                           resourceRequestCpu: "500m"
                           resourceRequestMemory: "512Mi"
-                          args: "^${computer.jnlpmac} ^${computer.name}"
+                          args: "1d"
                           alwaysPullImage: true
                     - name: jnlp-windows
                       nodeSelector: "kubernetes.io/os=windows"
                       containers:
                         - name: jnlp
-                          image: "jenkins4eval/jnlp-agent:latest-windows"
+                          image: "jenkins/inbound-agent:windowsservercore-1809"
                           resourceLimitCpu: "500m"
                           resourceLimitMemory: "512Mi"
                           resourceRequestCpu: "500m"
                           resourceRequestMemory: "512Mi"
-                          args: "^${computer.jnlpmac} ^${computer.name}"
+                          args: "1d"
                           alwaysPullImage: true
                       yaml: |-
                         spec:
@@ -151,6 +198,89 @@ jenkins:
                             operator: "Equal"
                             value: "windows"
                             effect: "NoSchedule"
+              - amazonEC2:
+                  cloudName: "aws-us-east-2"
+                  credentialsId: "ec2-agents-credentials"
+                  instanceCapStr: "20"
+                  noDelayProvisioning: true
+                  region: "us-east-2"
+                  sshKeysCredentialsId: "ec2-agents-privkey"
+                  useInstanceProfileForCredentials: false
+                  templates:
+                    - ami: "ami-091f656c070b5741f" # https://github.com/jenkins-infra/packer-images/blob/master/aws/ubuntu-18-agent.arm64.json
+                      amiOwners: "200564066411"
+                      amiType:
+                        unixData:
+                          sshPort: "22"
+                      associatePublicIp: true
+                      connectBySSHProcess: false
+                      connectionStrategy: PUBLIC_IP
+                      deleteRootOnTermination: true
+                      description: "ARM64 Ubuntu 18.04"
+                      ebsOptimized: false
+                      hostKeyVerificationStrategy: ACCEPT_NEW
+                      idleTerminationMinutes: "5"
+                      instanceCapStr: "10"
+                      labelString: "arm64 linux-arm64 linux-arm64-docker"
+                      launchTimeoutStr: "180"
+                      maxTotalUses: 1
+                      minimumNumberOfInstances: 0
+                      minimumNumberOfSpareInstances: 0
+                      mode: EXCLUSIVE
+                      monitoring: true
+                      numExecutors: 1
+                      remoteAdmin: "jenkins"
+                      remoteFS: "/home/jenkins"
+                      securityGroups: "ec2_agents_infraci"
+                      stopOnTerminate: false
+                      t2Unlimited: false
+                      tags:
+                      - name: "architecture"
+                        value: "arm64"
+                      - name: "os"
+                        value: "linux"
+                      - name: "jenkins"
+                        value: "infra.ci.jenkins.io"
+                      type: T4gMedium
+                      useDedicatedTenancy: false
+                      useEphemeralDevices: true
+                    - ami: "ami-03233867ef33df3bc" # https://github.com/jenkins-infra/packer-images/blob/master/aws/windows-2019-agent.amd64.json
+                      amiOwners: "200564066411"
+                      amiType:
+                        unixData:
+                          sshPort: "22"
+                      associatePublicIp: true
+                      connectBySSHProcess: false
+                      connectionStrategy: PUBLIC_IP
+                      deleteRootOnTermination: true
+                      description: "Windows 2019 AMD64"
+                      ebsOptimized: false
+                      hostKeyVerificationStrategy: ACCEPT_NEW
+                      idleTerminationMinutes: "5"
+                      instanceCapStr: "10"
+                      labelString: "windows windows-amd64 windows-amd64-docker"
+                      launchTimeoutStr: "180"
+                      maxTotalUses: 1
+                      minimumNumberOfInstances: 0
+                      minimumNumberOfSpareInstances: 0
+                      mode: EXCLUSIVE
+                      monitoring: true
+                      numExecutors: 1
+                      remoteAdmin: "Administrator"
+                      remoteFS: "C:\\Jenkins"
+                      securityGroups: "ec2_agents_infraci"
+                      stopOnTerminate: false
+                      t2Unlimited: false
+                      tags:
+                      - name: "architecture"
+                        value: "amd64"
+                      - name: "os"
+                        value: "windows"
+                      - name: "jenkins"
+                        value: "infra.ci.jenkins.io"
+                      type: T3Medium
+                      useDedicatedTenancy: false
+                      useEphemeralDevices: true
         jobs-settings: |
           jobs:
             - script: >
@@ -266,7 +396,7 @@ jenkins:
                   configure { node ->
                     def traits = node / navigators / 'org.jenkinsci.plugins.github__branch__source.GitHubSCMNavigator' / traits
                     traits << 'jenkins.scm.impl.trait.RegexSCMSourceFilterTrait' {
-                      regex('docker-.*')
+                      regex('docker-.*|^jenkins.io$')
                     }
                     traits << 'org.jenkinsci.plugins.github__branch__source.BranchDiscoveryTrait' {
                       strategyId(1)
@@ -388,10 +518,33 @@ jenkins:
                     rootDN: "${LDAP_ROOT_DN}"
                     managerDN: "${LDAP_MANAGER_DN}"
                     managerPasswordSecret: "${LDAP_MANAGER_PASSWORD}"
+                    mailAddressAttributeName: "mail"
                     userSearch: cn={0}
+                    userSearchBase: "ou=people"
+                    groupSearchBase: "ou=groups"
+                disableMailAddressResolver: false
+                groupIdStrategy: "caseInsensitive"
+                userIdStrategy: "caseInsensitive"
                 cache:
                   size: 100
                   ttl: 300
+        advisor-settings: |
+          jenkins:
+            disabledAdministrativeMonitors:
+              - com.cloudbees.jenkins.plugins.advisor.Reminder
+          advisor:
+            acceptToS: true
+            ccs:
+            - "damien.duportal@gmail.com"
+            email: "jenkins@oblak.com"
+            excludedComponents:
+              - "ItemsContent"
+              - "GCLogs"
+              - "Agents"
+              - "RootCAs"
+              - "SlaveLogs"
+              - "HeapUsageHistogram"
+            nagDisabled: true
         pipeline-library: |
           unclassified:
             globalLibraries:
@@ -411,11 +564,27 @@ jenkins:
               globalMatrix:
                 permissions:
                   - "Overall/Administer:admins"
-                  - "Overall/SystemRead:all"
-                  - "Overall/Read:all"
-                  - "Job/Read:all"
-                  - "Job/Build:all"
-                  - "Job/ExtendedRead:all"
+                  - "Overall/SystemRead:authenticated"
+                  - "Overall/Read:authenticated"
+                  - "Job/Read:authenticated"
+                  - "Job/Build:authenticated"
+                  - "Job/ExtendedRead:authenticated"
+        system-settings: |
+          jenkins:
+            disabledAdministrativeMonitors:
+              - "jenkins.security.QueueItemAuthenticatorMonitor"
+    sidecars:
+      configAutoReload:
+        env:
+          # https://github.com/kiwigrid/k8s-sidecar#configuration-environment-variables
+          - name: METHOD
+            # Polling mode (instead of watching kube API)
+            value: "SLEEP"
+          # https://github.com/kiwigrid/k8s-sidecar#configuration-environment-variables
+          - name: SLEEP_TIME
+            # Time in seconds between two polls
+            value: "60"
+    installPlugins: false
     ingress:
       enabled: true
       hostName: infra.ci.jenkins.io
