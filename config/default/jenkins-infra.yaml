@@ -151,6 +151,21 @@ jenkins:
                       id: "ec2-agents-credentials"
                       scope: SYSTEM
                       secretKey: "${EC2_AWS_SECRET_ACCESS_KEY}"
+                  - string:
+                      scope: GLOBAL
+                      id: "datadog-api-key"
+                      secret: "${DATADOG_API_KEY}"
+                      description: Datadog API key for infra.ci
+                  - string:
+                      scope: GLOBAL
+                      id: "datadog-app-key"
+                      secret: "${DATADOG_APP_KEY}"
+                      description: Datadog application key for infra.ci
+                  - string:
+                      scope: GLOBAL
+                      id: "terraform-datadog-azure-backend-account-key"
+                      secret: "${TERRAFORM_AZURE_BACKEND_ACCOUNT_KEY}"
+                      description: Account key for the Azure terraform backend used for datadog's management
         agent-settings: |
           jenkins:
             clouds:
@@ -242,7 +257,6 @@ jenkins:
                       - name: "jenkins"
                         value: "infra.ci.jenkins.io"
                       type: T4gMedium
-                      useDedicatedTenancy: false
                       useEphemeralDevices: true
                     - ami: "ami-03233867ef33df3bc" # https://github.com/jenkins-infra/packer-images/blob/master/aws/windows-2019-agent.amd64.json
                       amiOwners: "200564066411"
@@ -279,222 +293,159 @@ jenkins:
                       - name: "jenkins"
                         value: "infra.ci.jenkins.io"
                       type: T3Medium
-                      useDedicatedTenancy: false
                       useEphemeralDevices: true
+        # To add a job, choose if you want to add it as a map, inside the corresponding arrays below
+        # - A GH Org. requires a name, the GH Org (or user handle) of the repo and the pattern to capture the repo (s) name
+        # - A Multibranch requires a name, the GH Org (or user handle) of the repo, the repo name, an string identifier (we use the YYYYMMDDXX format with XX being a suffix integer)
         jobs-settings: |
           jobs:
+            # List of GH Org. Folders, add your own as another map (or append existing repoPattern)
             - script: >
-                multibranchPipelineJob('k8smgmt') {
-                  displayName "K8s Cluster Management"
-                  description "Current K8s Cluster Management"
-                  branchSources {
-                    github {
-                      id('2019081602')
-                      scanCredentialsId('github-app-infra')
-                      repoOwner('jenkins-infra')
-                      repository('charts')
-                    }
-                  }
-                  factory {
-                    workflowBranchProjectFactory {
-                      scriptPath('Jenkinsfile_k8s')
-                    }
-                  }
-                  configure { node ->
-                    def traits = node / 'sources' / 'data' / 'jenkins.branch.BranchSource' / 'source' / 'traits'
-                    traits << 'org.jenkinsci.plugins.github__branch__source.BranchDiscoveryTrait' {
-                      strategyId(1)
-                    }
-                    traits << 'org.jenkinsci.plugins.github__branch__source.OriginPullRequestDiscoveryTrait' {
-                      strategyId(1)
-                    }
-                    traits << 'org.jenkinsci.plugins.github__branch__source.ForkPullRequestDiscoveryTrait' {
-                      strategyId(1)
-                      trust(class: 'org.jenkinsci.plugins.github_branch_source.ForkPullRequestDiscoveryTrait$TrustPermission')
-                    }
-                    traits << 'jenkins.scm.impl.trait.WildcardSCMHeadFilterTrait' {
-                      includes('main master PR-*')
-                      excludes()
-                    }
-                    traits << 'org.jenkinsci.plugins.github.label.filter.PullRequestLabelsBlackListFilterTrait' {
-                      labels('on-hold ci-skip')
-                    }
-                  }
-                }
-            - script: >
-                multibranchPipelineJob('plugin-site') {
-                  displayName "Plugin Site"
-                  branchSources {
-                    github {
-                      id('2019081602')
-                      scanCredentialsId('github-app-infra')
-                      repoOwner('jenkins-infra')
-                      repository('plugin-site')
-                      includes('master')
-                    }
-                  }
-                  factory {
-                    workflowBranchProjectFactory {
-                      scriptPath('Jenkinsfile_k8s')
-                    }
-                  }
-                }
-            - script: >
-                organizationFolder('Docker Builds') {
-                  description('Docker Builds')
-                  displayName('Docker Builds')
-                  organizations {
-                    github {
-                      repoOwner("jenkins-infra")
-                      apiUri("https://api.github.com")
-                      credentialsId('github-app-infra')
+                [
+                  [ name: 'Docker Builds', GHOrganization: 'jenkins-infra', repoPattern: 'docker-.*$', jenkinsfilePath: 'Jenkinsfile_k8s'],
+                  [ name: 'Terraform Jobs', GHOrganization: 'jenkins-infra', repoPattern: 'aws|datadog$', jenkinsfilePath: 'Jenkinsfile_k8s'],
+                ].each { config ->
+                  organizationFolder(config.name) {
+                    description(config.name)
+                    displayName(config.name)
+                    organizations {
+                      github {
+                        repoOwner(config.GHOrganization)
+                        apiUri('https://api.github.com')
+                        credentialsId('github-app-infra')
 
-                      traits {
-                        gitHubTagDiscovery()
-                        cloneOptionTrait {
-                          extension {
-                            shallow(false)
-                            noTags(false)
-                            reference('')
-                            timeout(10)
-                            honorRefspec(true)
+                        traits {
+                          gitHubTagDiscovery()
+                          cloneOptionTrait {
+                            extension {
+                              shallow(false)
+                              noTags(false)
+                              reference('')
+                              timeout(10)
+                              honorRefspec(true)
+                            }
+                          }
+                          sourceRegexFilter {
+                            regex(config.repoPattern)
+                          }
+                          gitHubBranchDiscovery {
+                            strategyId(1) // 1-Exclude branches that are also filed as PRs
+                          }
+                          // Only Origin Pull Request
+                          gitHubPullRequestDiscovery {
+                            strategyId(1) // 1-Merging the pull request with the current target branch revision
+                          }
+                          gitHubExcludeArchivedRepositories()
+                          pullRequestLabelsBlackListFilterTrait {
+                            labels('on-hold ci-skip')
+                          }
+                          // Select branches and tags to build based on these filters
+                          headWildcardFilterWithPR {
+                            includes('main master PR-*') // only branches listed here
+                            excludes('')
+                            tagIncludes('*')
+                            tagExcludes('')
                           }
                         }
                       }
                     }
-                  }
-
-                  orphanedItemStrategy {
-                    discardOldItems {
-                      daysToKeep(7)
-                      numToKeep(10)
+                    orphanedItemStrategy {
+                      // Remove unused items as soon as possible
+                      discardOldItems {
+                        // Keep removed SCM heads/branch/PRs only for 1 day (not 0 days to be sure that jobs are all finished/timeouted when deleting)
+                        // Does not apply to the build history of kept branches(use Pipeline for that)
+                        daysToKeep(1)
+                      }
                     }
-                  }
-
-                  projectFactories {
-                    workflowMultiBranchProjectFactory {
-                      scriptPath('Jenkinsfile_k8s')
+                    projectFactories {
+                      workflowMultiBranchProjectFactory {
+                        scriptPath(config.jenkinsfilePath)
+                      }
                     }
-                  }
-
-                  buildStrategies {
-                    buildAnyBranches {
-                      strategies {
-                        buildChangeRequests {
-                          ignoreTargetOnlyChanges(true)
-                          ignoreUntrustedChanges(true)
-                        }
-                        buildRegularBranches()
-                        buildTags {
-                          atLeastDays("0")
-                          atMostDays("7")
+                    buildStrategies {
+                      buildAnyBranches {
+                        strategies {
+                          buildChangeRequests {
+                            ignoreTargetOnlyChanges(true)
+                            ignoreUntrustedChanges(true)
+                          }
+                          buildRegularBranches()
+                          buildTags {
+                            atLeastDays('-1')
+                            atMostDays('3')
+                          }
                         }
                       }
                     }
-                  }
-
-                  configure { node ->
-                    def traits = node / navigators / 'org.jenkinsci.plugins.github__branch__source.GitHubSCMNavigator' / traits
-                    traits << 'jenkins.scm.impl.trait.RegexSCMSourceFilterTrait' {
-                      regex('docker-.*|^jenkins.io$')
-                    }
-                    traits << 'org.jenkinsci.plugins.github__branch__source.BranchDiscoveryTrait' {
-                      strategyId(1)
-                    }
-                    traits << 'org.jenkinsci.plugins.github__branch__source.OriginPullRequestDiscoveryTrait' {
-                      strategyId(1)
-                    }
-                    traits << 'org.jenkinsci.plugins.github__branch__source.ForkPullRequestDiscoveryTrait' {
-                      strategyId(1)
-                      trust(class: 'org.jenkinsci.plugins.github_branch_source.ForkPullRequestDiscoveryTrait$TrustPermission')
-                    }
-                    traits << 'org.jenkinsci.plugins.github__branch__source.ExcludeArchivedRepositoriesTrait' {
-                    }
-                    traits << 'net.gleske.scmfilter.impl.trait.WildcardSCMHeadFilterTrait' {
-                      includes('main master PR-*')
-                      excludes()
-                      tagIncludes('*')
-                      tagExcludes()
-                    }
-                    traits << 'org.jenkinsci.plugins.github.label.filter.PullRequestLabelsBlackListFilterTrait' {
-                      labels('on-hold ci-skip')
+                    configure { node ->
+                      def traits = node / navigators / 'org.jenkinsci.plugins.github__branch__source.GitHubSCMNavigator' / traits
+                      // Not discovered by Job-DSL: need to be configured as raw-XML
+                      traits << 'org.jenkinsci.plugins.github__branch__source.ForkPullRequestDiscoveryTrait' {
+                        strategyId(1) // 1-Merging the pull request with the current target branch revision
+                        trust(class: 'org.jenkinsci.plugins.github_branch_source.ForkPullRequestDiscoveryTrait$TrustPermission')
+                      }
                     }
                   }
                 }
-            - script: >
-                multibranchPipelineJob('aws') {
-                  displayName "AWS Infra"
-                  branchSources {
-                    github {
-                      id('2020120401')
-                      scanCredentialsId('github-app-infra')
-                      repoOwner('jenkins-infra')
-                      repository('aws')
-                    }
-                  }
-                  factory {
-                    workflowBranchProjectFactory {
-                      scriptPath('Jenkinsfile_k8s')
-                    }
-                  }
-                }
+            # List of MultiBranches, add your own as another map
             - script: >
                 [
-                  ['jenkins-infra', 'jenkins-wiki-exporter', 'Wiki Exporter'],
-                  ['jenkinsci', 'custom-distribution-service', 'Custom Distribution Service'],
-                  ['jenkins-infra', 'incrementals-publisher', 'Incrementals Publisher'],
+                  [ name: 'Wiki Exporter', GHOrganization: 'jenkins-infra', repository: 'jenkins-wiki-exporter', internalId: '2021042801', jenkinsfilePath: 'Jenkinsfile'],
+                  [ name: 'Custom Distribution Service', GHOrganization: 'jenkinsci', repository: 'custom-distribution-service', internalId: '2021042802', jenkinsfilePath: 'Jenkinsfile'],
+                  [ name: 'Incrementals Publisher', GHOrganization: 'jenkins-infra', repository: 'incrementals-publisher', internalId: '2021042801',jenkinsfilePath: 'Jenkinsfile'],
+                  [ name: 'K8s Cluster Management', GHOrganization: 'jenkins-infra', repository: 'charts', internalId: '2019081601',jenkinsfilePath: 'Jenkinsfile_k8s'],
+                  [ name: 'Plugin Site', GHOrganization: 'jenkins-infra', repository: 'plugin-site', internalId: '2019081603',jenkinsfilePath: 'Jenkinsfile_k8s'],
                 ].each { config ->
-                  multibranchPipelineJob(config[1]) {
-                    displayName config[2]
+                  multibranchPipelineJob(config.repository) {
+                    displayName config.name
                     triggers {
-                      pollSCM {
-                        // poll every two hours until hooks are setup
-                        scmpoll_spec('H/2 * * * *')
+                      periodicFolderTrigger {
+                        interval('2h')
                       }
                     }
                     branchSources {
                       branchSource {
                         source {
                           github {
+                            id(config.internalId)
                             credentialsId("github-app-infra")
                             configuredByUrl(true)
-                            repositoryUrl('https://github.com/' + config[0] + '/' + config[1])
-                            repoOwner(config[0])
-                            repository(config[1])
+                            repositoryUrl('https://github.com/' + config.GHOrganization + '/' + config.repository)
+                            repoOwner(config.GHOrganization)
+                            repository(config.repository)
                             traits {
                               gitHubBranchDiscovery {
                                 strategyId(1) // 1-only branches that are not pull requests
                               }
+                              // Only Origin Pull Request
+                              gitHubPullRequestDiscovery {
+                                strategyId(1) // 1-Merging the pull request with the current target branch revision
+                              }
                               pruneStaleBranchTrait()
                               gitHubTagDiscovery()
+                              pullRequestLabelsBlackListFilterTrait {
+                                labels('on-hold ci-skip')
+                              }
+                              // Select branches and tags to build based on these filters
+                              headWildcardFilterWithPR {
+                                includes('main master PR-*') // only branches listed here
+                                excludes('')
+                                tagIncludes('*')
+                                tagExcludes('')
+                              }
                             }
                           }
                           buildStrategies {
                             buildAnyBranches {
                               strategies {
-                                buildAllBranches {
-                                  strategies {
-                                    buildNamedBranches {
-                                      filters {
-                                        exact {
-                                          name("master")
-                                          caseSensitive(true)
-                                        }
-                                      }
-                                    }
-                                  }
+                                buildChangeRequests {
+                                  ignoreTargetOnlyChanges(true)
+                                  ignoreUntrustedChanges(true)
                                 }
-                              }
-                            }
-                            buildAnyBranches {
-                              strategies {
-                                buildAllBranches {
-                                  strategies {
-                                    buildTags {
-                                      atLeastDays '-1'
-                                      atMostDays '3'
-                                    }
-                                  }
+                                buildRegularBranches()
+                                buildTags {
+                                  atLeastDays('-1')
+                                  atMostDays('3')
                                 }
                               }
                             }
@@ -504,7 +455,23 @@ jenkins:
                     }
                     factory {
                       workflowBranchProjectFactory {
-                        scriptPath('Jenkinsfile')
+                        scriptPath(config.jenkinsfilePath)
+                      }
+                    }
+                    orphanedItemStrategy {
+                      // Remove unused items as soon as possible
+                      discardOldItems {
+                        // Keep removed SCM heads/branch/PRs only for 1 day (not 0 days to be sure that jobs are all finished/timeouted when deleting)
+                        // Does not apply to the build history of kept branches(use Pipeline for that)
+                        daysToKeep(1)
+                      }
+                    }
+                    configure { node ->
+                      def traits = node / 'sources' / 'data' / 'jenkins.branch.BranchSource' / 'source' / 'traits'
+                      // Not discovered by Job-DSL: need to be configured as raw-XML
+                      traits << 'org.jenkinsci.plugins.github__branch__source.ForkPullRequestDiscoveryTrait' {
+                        strategyId(1) // 1-Merging the pull request with the current target branch revision
+                        trust(class: 'org.jenkinsci.plugins.github_branch_source.ForkPullRequestDiscoveryTrait$TrustPermission')
                       }
                     }
                   }
