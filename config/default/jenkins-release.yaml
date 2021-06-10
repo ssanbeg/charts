@@ -18,7 +18,7 @@ jenkins:
         name: "release"
   controller:
     image: jenkinsciinfra/jenkins-lts
-    tag: 0.3.1-2.277.4
+    tag: 0.5.5-2.289.1-lts
     resources:
       limits:
         cpu: "2"
@@ -174,15 +174,21 @@ jenkins:
                           alwaysPullImage: true
                     - name: jnlp-windows
                       nodeSelector: "kubernetes.io/os=windows"
+                      instanceCap: 5 # Usual sizing is 2 pods per Windows node, and max 3 windows nodes
+                      instanceCapStr: "5"
                       containers:
                         - name: jnlp
                           image: "jenkins/inbound-agent:windowsservercore-1809"
+                          command: "powershell"
+                          args: "Start-Sleep 999999"
                           resourceLimitCpu: "500m"
                           resourceLimitMemory: "1024Mi"
                           resourceRequestCpu: "500m"
                           resourceRequestMemory: "1024Mi"
                           args: "1d"
                           alwaysPullImage: true
+                          workingDir: "C:\\Users\\jenkins"
+                      yamlMergeStrategy: "override"
                       yaml: |-
                         spec:
                           tolerations:
@@ -445,6 +451,10 @@ jenkins:
                   - "Overall/Read:authenticated"
                   - "Job/Read:authenticated"
         system-settings: |
+          unclassified:
+            defaultFolderConfiguration:
+              # Keep healthMetrics an empty list to ensure weather is disabled
+              healthMetrics: []
           jenkins:
             disabledAdministrativeMonitors:
               - "jenkins.security.QueueItemAuthenticatorMonitor"
